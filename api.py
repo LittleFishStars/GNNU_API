@@ -1,3 +1,4 @@
+from secrets import token_hex
 from typing import Literal, Any
 from urllib.parse import urlparse
 
@@ -7,21 +8,26 @@ from lxml import html
 import login
 
 
-def login_verify(student_id: int, password: str, service: str = ''):
+def login_verify(student_id: int, password: str, service: str = '') -> tuple[bool, Any]:
+    """
+    登陆验证
+    调用统一验证平台的接口进行登陆验证
+
+    :param student_id: 学号
+    :param password: 登陆密码
+    :param service: 访问的服务
+
+	:return (是否成功, 返回结果)
+    """
     res = login.login(student_id, password, service)
     return res[0] != res[1] and type(res[0]) == str, res
 
 
 class Captcha:
-    token_hex = None
-
-    def __new__(cls, *args, **kwargs):
-        if cls.token_hex is None:
-            from secrets import token_hex
-            cls.token_hex = token_hex
+    """统一验证平台的验证码api"""
 
     def __init__(self):
-        self.uid = self.token_hex(16)
+        self.uid = token_hex(16)
         response = requests.get(f'https://cas.gnnu.edu.cn/lyuapServer/kaptcha?id={self.uid}')
         data = response.json()
         self._img = data['content']
@@ -29,14 +35,18 @@ class Captcha:
 
     @property
     def img(self):
+        """返回验证码图片的base64"""
         return self._img
 
     def verify(self, captcha: str) -> bool:
-        res = login.get_login(0, '', captcha, self.uid)
+        """验证输入的验证码是否正确"""
+        res = login.try_login(0, '', captcha, self.uid)
         return res != ('CODEFALSE', 'CODEFALSE')
 
 
 class Student:
+    """所有学生相关的数据"""
+
     def __init__(self, student_id: int, password: str):
         self._student_id = student_id
         while True:
@@ -57,9 +67,6 @@ class Student:
         self._info = {}
 
     def _get_basic_info(self):
-        """获取基本信息
-        ((姓名, 身份), (学院, 班级), 头像URL)
-        """
         response = requests.get(
             'https://jwgl.gnnu.edu.cn/xtgl/index_cxYhxxIndex.html?xt=jw&localeKey=zh_CN',
             cookies=self._cookie,
@@ -70,7 +77,6 @@ class Student:
         self._info['avatar'] = 'https://jwgl.gnnu.edu.cn' + tree.xpath('//img/@src')[0]
 
     def _get_student_info(self):
-        """获取学生信息"""
         response = requests.get(
             'https://jwgl.gnnu.edu.cn/xsxxxggl/xsgrxxwh_cxXsgrxx.html',
             params={
@@ -261,7 +267,13 @@ class Student:
         return self._info['class_schedule']
 
     def get_class_schedule(self, year: int, term: int, week: int = 0):
-        """获取课表"""
+        """
+        获取课表
+
+        :param year: 学年
+        :param term: 学期（1或2）
+        :param week: 周（为0返回整学期课表）
+        """
         if 'class_schedule' in self._info:
             if year in self._info['class_schedule'] and term in self._info['class_schedule'][year]:
                 return self._info['class_schedule'][year][term]
@@ -336,6 +348,7 @@ class Student:
         return res
 
     def get_timetable(self, year: int, term: int) -> list[dict[str, str]]:
+        """获取时间表"""
         if 'timetable' in self._info:
             return self._info['timetable']
         response = requests.post(
@@ -351,7 +364,7 @@ class Student:
         return list(map(lambda x: {'start': x['qssj'], 'end': x['jssj']}, response.json()))
 
     def get_course(self, year: int, term: int, class_name: str) -> list[dict[str, Any]]:
-        """获取课程"""
+        """获取课程信息"""
         class_schedule = self.get_class_schedule(year, term)
         if class_name not in class_schedule:
             return []
